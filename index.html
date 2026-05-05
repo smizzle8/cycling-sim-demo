@@ -71,7 +71,9 @@
       <div class="chip"><span>Steer</span><b id="steer">0°</b></div>
       <div class="chip"><span>Time</span><b id="time">0:00</b></div>
       <div class="chip warn"><span>Lateral</span><b id="lat">0.0 m</b></div>
+      <div class="chip" id="targetChip" style="display:none"><span>Target rpm</span><b id="targetRpm">70-90</b></div>
     </div>
+    <div id="countdown" style="position:absolute;inset:0;display:none;align-items:center;justify-content:center;font-size:160px;font-weight:800;color:#fff;text-shadow:0 6px 30px rgba(0,0,0,.7);z-index:3;pointer-events:none"></div>
     <div id="segLabel">— ready —</div>
     <div id="cue">↑</div>
     <div id="offWarn">OFF ROAD</div>
@@ -98,8 +100,10 @@
           </div>
         </div>
         <p class="stats" style="margin-top:14px">
-          7 segments · ~700 m · ~2 min at moderate effort.<br>
-          Sampling 10 Hz · CSV at end · NASA-TLX-lite.
+          <b>A — baseline</b>: standard road width.<br>
+          <b>B — narrow</b>: half the road width — precision steering.<br>
+          <b>C — cadence target</b>: hold 70–90 rpm; live colour feedback.<br><br>
+          7 segments · ~840 m · ~2 min · 10 Hz logging · per-cue reaction times.
         </p>
         <div class="actions">
           <button id="startBtn">Begin Trial</button>
@@ -230,8 +234,31 @@
     relHead:0,        // bike heading relative to track tangent (rad)
     brakeEvents:0, prevBrake:false, offRoadTime:0,
     pedalPhase:0,     // for visible pedal/leg animation
+    countdown:0,      // seconds remaining in pre-trial countdown
+    cueState:null,    // {dir, tStart, responded, rt} for reaction-time logging
+    cueResponses:[],  // array of recorded reaction times
     samples:[]
   };
+
+  // Deterministic forest: tree positions [{d, side, kind, scale}]
+  const TREES = (() => {
+    const out = [];
+    let seed = 1337;
+    const rnd = () => (seed = (seed*9301+49297) % 233280) / 233280;
+    for (let d = 6; d < TRACK_LEN+40; d += 4 + rnd()*6){
+      // both sides, sometimes skip one for variety
+      if (rnd() < 0.85) out.push({d, side:-1, kind: rnd()<0.7?'pine':'oak', scale:0.85+rnd()*0.4, off: 1.2+rnd()*4});
+      if (rnd() < 0.85) out.push({d, side:+1, kind: rnd()<0.7?'pine':'oak', scale:0.85+rnd()*0.4, off: 1.2+rnd()*4});
+    }
+    return out;
+  })();
+
+  // Distance markers every 100m on right shoulder
+  const MARKERS = (() => {
+    const m = [];
+    for (let d = 100; d < TRACK_LEN; d += 100) m.push({d, label:`${d} m`});
+    return m;
+  })();
 
   // ---------- Tunables ----------
   const MAX_SPEED=14, PEDAL=3.0, COAST=0.5, BRAKE=6.0;
@@ -285,6 +312,30 @@
 
     // pedal phase advances with cadence (rev/sec = rpm/60)
     S.pedalPhase += (S.cadence/60) * 2*Math.PI * dt;
+
+    // Reaction time tracking — use the next-turn cue as the stimulus.
+    const turn = nextTurn(S.dist);
+    const cueDir = (turn && turn.distAhead <= 60) ? turn.dir : null;
+    if (cueDir && (!S.cueState || S.cueState.dir !== cueDir)){
+      // new cue appeared
+      S.cueState = { dir:cueDir, tStart:S.t, responded:false, rt:null, steerStart:S.steer };
+    }
+    if (S.cueState && !S.cueState.responded){
+      const want = S.cueState.dir==='right' ? 1 : -1;
+      // require steering of at least 0.08 rad in the cued direction past the starting point
+      if ((S.steer - S.cueState.steerStart) * want >= 0.08){
+        S.cueState.responded = true;
+        S.cueState.rt = +(S.t - S.cueState.tStart).toFixed(3);
+        S.cueResponses.push({ dir:S.cueState.dir, rt:S.cueState.rt, t:+S.t.toFixed(2) });
+      }
+    }
+    if (!cueDir && S.cueState && (S.cueState.dir!== (TRACK[segAt(S.dist)].curv>0?'right':TRACK[segAt(S.dist)].curv<0?'left':null))){
+      // cue ended — clear so a future cue can register
+      S.cueState = null;
+    }
+
+    // Condition C: cadence target band 70–90 rpm. Track time spent in band.
+    if (S.cond === 'C' && S.cadence >= 70 && S.cadence <= 90) S.cadenceComplianceS = (S.cadenceComplianceS||0) + dt;
   }
 
   // ---------- Render ----------
@@ -292,26 +343,48 @@
   function draw(){
     ctx.clearRect(0,0,W,H);
 
-    // Sky + ground (with sun and parallax clouds)
+    // === Sky: alpine/forest morning ===
     const sky = ctx.createLinearGradient(0,0,0,H*0.55);
-    sky.addColorStop(0,'#5fb4ff'); sky.addColorStop(0.7,'#a9d6ff'); sky.addColorStop(1,'#e3f0fb');
+    sky.addColorStop(0,'#3f7fb8'); sky.addColorStop(0.55,'#9bc6e8'); sky.addColorStop(1,'#e8f3fb');
     ctx.fillStyle=sky; ctx.fillRect(0,0,W,H*0.55);
     // sun
-    const sunX = W*0.78, sunY = H*0.18;
-    const sunGrad = ctx.createRadialGradient(sunX,sunY,4,sunX,sunY,80);
-    sunGrad.addColorStop(0,'rgba(255,240,180,1)'); sunGrad.addColorStop(0.4,'rgba(255,220,140,.6)'); sunGrad.addColorStop(1,'rgba(255,220,140,0)');
-    ctx.fillStyle=sunGrad; ctx.beginPath(); ctx.arc(sunX,sunY,80,0,2*Math.PI); ctx.fill();
-    ctx.fillStyle='#fff8d6'; ctx.beginPath(); ctx.arc(sunX,sunY,20,0,2*Math.PI); ctx.fill();
-    // parallax clouds (drift slowly with distance)
-    ctx.fillStyle='rgba(255,255,255,.85)';
-    for (const c of [{x:0.15,y:0.12,r:18},{x:0.32,y:0.20,r:24},{x:0.55,y:0.10,r:16},{x:0.92,y:0.30,r:20}]){
+    const sunX = W*0.74, sunY = H*0.16;
+    const sunGrad = ctx.createRadialGradient(sunX,sunY,4,sunX,sunY,90);
+    sunGrad.addColorStop(0,'rgba(255,245,200,1)'); sunGrad.addColorStop(0.4,'rgba(255,215,140,.5)'); sunGrad.addColorStop(1,'rgba(255,215,140,0)');
+    ctx.fillStyle=sunGrad; ctx.beginPath(); ctx.arc(sunX,sunY,90,0,2*Math.PI); ctx.fill();
+    ctx.fillStyle='#fff8d6'; ctx.beginPath(); ctx.arc(sunX,sunY,18,0,2*Math.PI); ctx.fill();
+    // parallax clouds
+    ctx.fillStyle='rgba(255,255,255,.88)';
+    for (const c of [{x:0.15,y:0.10,r:18},{x:0.32,y:0.18,r:22},{x:0.55,y:0.08,r:16},{x:0.92,y:0.28,r:20}]){
       const cx = ((c.x*W - S.dist*1.2) % W + W) % W;
       drawCloud(cx, H*c.y, c.r);
     }
-    // ground gradient
-    const gnd = ctx.createLinearGradient(0,H*0.55,0,H);
-    gnd.addColorStop(0,'#6ea436'); gnd.addColorStop(1,'#3e6a1c');
-    ctx.fillStyle=gnd; ctx.fillRect(0,H*0.55,W,H*0.45);
+
+    // === Mountain layers (3, far→near, with parallax driven by dist) ===
+    function mountainLayer(yBase, amp, period, color, parallax){
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.moveTo(0, yBase);
+      const off = (S.dist*parallax) % period;
+      for (let x = -off; x <= W + period; x += period/2){
+        ctx.lineTo(x + period*0.25, yBase - amp);
+        ctx.lineTo(x + period*0.5,  yBase - amp*0.3);
+      }
+      ctx.lineTo(W, yBase); ctx.lineTo(W, H*0.55); ctx.lineTo(0, H*0.55);
+      ctx.closePath(); ctx.fill();
+    }
+    mountainLayer(H*0.42, 70, 220, '#5b6d8a', 0.15);
+    mountainLayer(H*0.48, 55, 160, '#43586f', 0.30);
+    mountainLayer(H*0.53, 38, 110, '#2e4257', 0.55);
+
+    // === Mid-ground hills (just below mountains) ===
+    const hillGrad = ctx.createLinearGradient(0,H*0.55,0,H*0.66);
+    hillGrad.addColorStop(0,'#3a6a30'); hillGrad.addColorStop(1,'#2a5024');
+    ctx.fillStyle=hillGrad; ctx.fillRect(0,H*0.55,W,H*0.11);
+    // ground (grass) with subtle gradient
+    const gnd = ctx.createLinearGradient(0,H*0.66,0,H);
+    gnd.addColorStop(0,'#4d8033'); gnd.addColorStop(1,'#2d4f1e');
+    ctx.fillStyle=gnd; ctx.fillRect(0,H*0.66,W,H*0.34);
 
     // Look-ahead road. We render N horizontal slices from horizon down.
     // Each slice corresponds to a road distance ahead and has an x-offset accumulated
@@ -572,7 +645,11 @@
   function fmtTime(s){ const m=Math.floor(s/60), x=Math.floor(s%60); return m+':'+(x<10?'0':'')+x; }
   function updateHUD(){
     $('kmh').textContent=(S.speed*3.6).toFixed(1);
-    $('rpm').textContent=S.cadence|0;
+    const rpmEl = $('rpm');
+    rpmEl.textContent = S.cadence|0;
+    if (S.cond==='C'){
+      rpmEl.style.color = (S.cadence>=70 && S.cadence<=90) ? '#3fb950' : '#d29922';
+    } else { rpmEl.style.color = ''; }
     $('steer').textContent=(S.steer*180/Math.PI).toFixed(0)+'°';
     $('time').textContent=fmtTime(S.t);
     $('lat').textContent=S.lat.toFixed(1)+' m';
@@ -599,14 +676,37 @@
   function startTrial(){
     S.pid = +$('pid').value || 1;
     S.cond = $('cond').value;
-    S.running=true; S.finished=false;
-    S.t0=performance.now(); S.t=0;
+    S.running=false; S.finished=false;
+    S.t0=0; S.t=0;
     S.speed=0; S.cadence=0; S.steer=0;
     S.dist=0; S.lat=0; S.relHead=0;
     S.brakeEvents=0; S.prevBrake=false; S.offRoadTime=0;
-    S.samples=[];
+    S.samples=[]; S.cueResponses=[]; S.cueState=null;
+    S.cadenceComplianceS = 0;
+    S.countdown = 3.0;
     $('setup').classList.add('hidden');
     $('finish').classList.add('hidden');
+    $('targetChip').style.display = (S.cond==='C') ? '' : 'none';
+    runCountdown();
+  }
+  function runCountdown(){
+    const el = $('countdown');
+    el.style.display = 'flex';
+    el.textContent = Math.ceil(S.countdown);
+    const tick0 = performance.now();
+    const iv = setInterval(() => {
+      const elapsed = (performance.now() - tick0)/1000;
+      S.countdown = 3.0 - elapsed;
+      if (S.countdown > 0){
+        el.textContent = Math.ceil(S.countdown);
+      } else {
+        el.textContent = 'GO';
+        setTimeout(()=>{ el.style.display='none'; }, 350);
+        clearInterval(iv);
+        S.t0 = performance.now();
+        S.running = true;
+      }
+    }, 100);
   }
   function endTrial(reason){
     if (!S.running) return;
@@ -614,10 +714,19 @@
     const avg = S.samples.length ? S.samples.reduce((a,s)=>a+s.speed_kmh,0)/S.samples.length : 0;
     const rms = Math.sqrt(S.samples.reduce((a,s)=>a+s.lat_offset_m*s.lat_offset_m,0)/Math.max(1,S.samples.length));
     const rev = countSteerReversals(S.samples);
+    const rts = S.cueResponses.map(r=>r.rt);
+    const meanRT = rts.length ? (rts.reduce((a,b)=>a+b,0)/rts.length) : null;
+    const condCLine = (S.cond==='C')
+      ? `<br>Cadence-in-band: <b>${(S.cadenceComplianceS||0).toFixed(1)} s</b> (target 70–90 rpm)`
+      : '';
+    const rtLine = rts.length
+      ? `<br>Cue reactions: <b>${rts.length}/${TRACK.filter(t=>t.curv!==0).length}</b> · mean RT: <b>${meanRT.toFixed(2)} s</b>`
+      : `<br>Cue reactions: <b>0/${TRACK.filter(t=>t.curv!==0).length}</b>`;
     $('finishStats').innerHTML =
       `Reason: <b>${reason}</b> · Time: <b>${fmtTime(S.t)}</b> · Distance: <b>${S.dist.toFixed(0)} m</b><br>`+
       `Avg speed: <b>${avg.toFixed(1)} km/h</b> · Lateral RMS: <b>${rms.toFixed(2)} m</b><br>`+
-      `Brake events: <b>${S.brakeEvents}</b> · Steer reversals: <b>${rev}</b> · Off-road: <b>${S.offRoadTime.toFixed(1)} s</b>`;
+      `Brake events: <b>${S.brakeEvents}</b> · Steer reversals: <b>${rev}</b> · Off-road: <b>${S.offRoadTime.toFixed(1)} s</b>`+
+      rtLine + condCLine;
     $('finish').classList.remove('hidden');
   }
   function countSteerReversals(samples){
@@ -643,6 +752,8 @@
 
   $('downloadBtn').addEventListener('click', () => {
     const rms = Math.sqrt(S.samples.reduce((a,s)=>a+s.lat_offset_m*s.lat_offset_m,0)/Math.max(1,S.samples.length));
+    const rts = S.cueResponses.map(r=>r.rt);
+    const meanRT = rts.length ? +(rts.reduce((a,b)=>a+b,0)/rts.length).toFixed(3) : '';
     const meta = {
       participant:S.pid, condition:S.cond,
       track_length_m:TRACK_LEN,
@@ -652,6 +763,11 @@
       steer_reversals:countSteerReversals(S.samples),
       lateral_rms_m:+rms.toFixed(3),
       off_road_s:+S.offRoadTime.toFixed(2),
+      cues_total: TRACK.filter(t=>t.curv!==0).length,
+      cues_responded: rts.length,
+      mean_reaction_time_s: meanRT,
+      reaction_times_s: rts.join('|'),
+      cadence_in_band_s: +((S.cadenceComplianceS||0).toFixed(2)),
       tlx_mental:+$('rMental').value,
       tlx_physical:+$('rPhys').value,
       tlx_frustration:+$('rFrus').value,
