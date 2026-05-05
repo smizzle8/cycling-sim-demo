@@ -47,9 +47,10 @@
   .pill{display:inline-block;background:#21262d;border:1px solid var(--line);border-radius:999px;padding:2px 8px;font-size:11px;color:var(--muted);margin-right:4px}
 
   .overlay{position:absolute;inset:0;background:rgba(8,10,14,.85);backdrop-filter:blur(4px);display:flex;align-items:center;justify-content:center;z-index:10}
-  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:24px;width:min(440px,90%);max-height:90%;overflow:auto}
-  .card h2{margin:0 0 4px;font-size:18px}
-  .card p.lead{color:var(--muted);margin:0 0 16px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:28px;width:min(460px,92%);max-height:92%;overflow:auto;box-shadow:0 30px 80px rgba(0,0,0,.55),0 2px 0 rgba(255,255,255,.04) inset}
+  .card .brand{font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--accent);font-weight:700;margin:0 0 6px}
+  .card h2{margin:0 0 6px;font-size:22px;letter-spacing:-.01em}
+  .card p.lead{color:var(--muted);margin:0 0 18px;font-size:13px}
   .row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
   .slider-row{margin:10px 0}
   .slider-row .lbl{display:flex;justify-content:space-between;font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
@@ -79,8 +80,9 @@
 
     <div class="overlay" id="setup">
       <div class="card">
-        <h2>Cycling Trial</h2>
-        <p class="lead">~2-min track. Follow the arrows — the road bends; your steering must match.</p>
+        <p class="brand">Cycling Sim · Trial</p>
+        <h2>Ready to ride?</h2>
+        <p class="lead">~2-minute track with directional cues. Match the arrows — the road bends, your steering must follow.</p>
         <div class="row">
           <div>
             <label for="pid">Participant #</label>
@@ -227,6 +229,7 @@
     lat:0,            // lateral offset from centerline (m), + = right
     relHead:0,        // bike heading relative to track tangent (rad)
     brakeEvents:0, prevBrake:false, offRoadTime:0,
+    pedalPhase:0,     // for visible pedal/leg animation
     samples:[]
   };
 
@@ -273,6 +276,9 @@
 
     if (braking && !S.prevBrake) S.brakeEvents++;
     S.prevBrake = braking;
+
+    // pedal phase advances with cadence (rev/sec = rpm/60)
+    S.pedalPhase += (S.cadence/60) * 2*Math.PI * dt;
   }
 
   // ---------- Render ----------
@@ -280,11 +286,26 @@
   function draw(){
     ctx.clearRect(0,0,W,H);
 
-    // Sky + ground
+    // Sky + ground (with sun and parallax clouds)
     const sky = ctx.createLinearGradient(0,0,0,H*0.55);
-    sky.addColorStop(0,'#7ec8ff'); sky.addColorStop(1,'#cfe9ff');
+    sky.addColorStop(0,'#5fb4ff'); sky.addColorStop(0.7,'#a9d6ff'); sky.addColorStop(1,'#e3f0fb');
     ctx.fillStyle=sky; ctx.fillRect(0,0,W,H*0.55);
-    ctx.fillStyle='#5d8a2f'; ctx.fillRect(0,H*0.55,W,H*0.45);
+    // sun
+    const sunX = W*0.78, sunY = H*0.18;
+    const sunGrad = ctx.createRadialGradient(sunX,sunY,4,sunX,sunY,80);
+    sunGrad.addColorStop(0,'rgba(255,240,180,1)'); sunGrad.addColorStop(0.4,'rgba(255,220,140,.6)'); sunGrad.addColorStop(1,'rgba(255,220,140,0)');
+    ctx.fillStyle=sunGrad; ctx.beginPath(); ctx.arc(sunX,sunY,80,0,2*Math.PI); ctx.fill();
+    ctx.fillStyle='#fff8d6'; ctx.beginPath(); ctx.arc(sunX,sunY,20,0,2*Math.PI); ctx.fill();
+    // parallax clouds (drift slowly with distance)
+    ctx.fillStyle='rgba(255,255,255,.85)';
+    for (const c of [{x:0.15,y:0.12,r:18},{x:0.32,y:0.20,r:24},{x:0.55,y:0.10,r:16},{x:0.92,y:0.30,r:20}]){
+      const cx = ((c.x*W - S.dist*1.2) % W + W) % W;
+      drawCloud(cx, H*c.y, c.r);
+    }
+    // ground gradient
+    const gnd = ctx.createLinearGradient(0,H*0.55,0,H);
+    gnd.addColorStop(0,'#6ea436'); gnd.addColorStop(1,'#3e6a1c');
+    ctx.fillStyle=gnd; ctx.fillRect(0,H*0.55,W,H*0.45);
 
     // Look-ahead road. We render N horizontal slices from horizon down.
     // Each slice corresponds to a road distance ahead and has an x-offset accumulated
@@ -350,15 +371,8 @@
       }
     }
 
-    // Foreground bike (handlebars rotate with steer; bike body stays centered)
-    const bx = W/2, by = H-70;
-    ctx.save();
-    ctx.translate(bx, by);
-    ctx.rotate(S.steer*0.6);
-    ctx.fillStyle='#111'; ctx.fillRect(-140,-8,280,16);
-    ctx.fillStyle='#222'; ctx.fillRect(-150,-14,12,28);
-    ctx.fillStyle='#222'; ctx.fillRect( 138,-14,12,28);
-    ctx.restore();
+    // Foreground bike + rider (rear-view). Tilts opposite to steer (lean into turn).
+    drawBike(W/2, H-30, S.steer, S.pedalPhase, S.speed);
 
     // Lean tilt indicator (top center, mirrors steer)
     const gx=W/2, gy=44, gw=160, gh=8;
@@ -375,6 +389,134 @@
     ctx.arcTo(x,y+h,x,y,r);
     ctx.arcTo(x,y,x+w,y,r);
     ctx.closePath();
+  }
+
+  function drawCloud(x,y,r){
+    ctx.beginPath();
+    ctx.arc(x,y,r,0,2*Math.PI);
+    ctx.arc(x+r*0.9,y+r*0.1,r*0.8,0,2*Math.PI);
+    ctx.arc(x-r*0.8,y+r*0.15,r*0.7,0,2*Math.PI);
+    ctx.arc(x+r*0.4,y-r*0.3,r*0.6,0,2*Math.PI);
+    ctx.fill();
+  }
+
+  // Rear-view bike + rider. steer in radians, phase in radians (pedal rotation).
+  function drawBike(cx, cy, steer, phase, speed){
+    const lean = -steer * 0.45;     // lean INTO the turn (opposite to steer rotation)
+    const sway = Math.sin(phase*2) * 1.2; // tiny side-to-side body sway
+
+    ctx.save();
+    ctx.translate(cx, cy + sway);
+    ctx.rotate(lean);
+
+    // ground shadow
+    ctx.fillStyle = 'rgba(0,0,0,.25)';
+    ctx.beginPath(); ctx.ellipse(0, 6, 95, 12, 0, 0, 2*Math.PI); ctx.fill();
+
+    // --- rear wheel (we see it edge-on from behind) ---
+    const wheelR = 56, wheelInner = 50;
+    // tire
+    ctx.fillStyle = '#0e0e10';
+    ctx.beginPath(); ctx.ellipse(0, -wheelR*0.4, 22, wheelR, 0, 0, 2*Math.PI); ctx.fill();
+    // hub + spokes (rotate with motion)
+    const spinAngle = phase * 2.2; // wheel spin tied to cadence
+    ctx.save();
+    ctx.translate(0, -wheelR*0.4);
+    ctx.scale(1, wheelR/22); // perspective squish for rear view
+    ctx.rotate(spinAngle);
+    ctx.strokeStyle = '#999'; ctx.lineWidth = 1.5;
+    for (let i=0;i<6;i++){
+      ctx.save(); ctx.rotate(i*Math.PI/3);
+      ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(0,18); ctx.stroke();
+      ctx.restore();
+    }
+    ctx.fillStyle = '#cfd3d8';
+    ctx.beginPath(); ctx.arc(0,0,4,0,2*Math.PI); ctx.fill();
+    ctx.restore();
+
+    // --- frame (seat tube + top tube going forward, rear triangle) ---
+    ctx.strokeStyle = '#d83a3a';
+    ctx.lineWidth = 6;
+    ctx.lineCap = 'round';
+    // seat stays (from rear hub up to seat)
+    ctx.beginPath(); ctx.moveTo(-12, -wheelR*0.4); ctx.lineTo(0, -wheelR*1.4); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo( 12, -wheelR*0.4); ctx.lineTo(0, -wheelR*1.4); ctx.stroke();
+    // seatpost up to saddle
+    ctx.beginPath(); ctx.moveTo(0, -wheelR*1.4); ctx.lineTo(0, -wheelR*1.7); ctx.stroke();
+    // saddle
+    ctx.fillStyle = '#1a1a1a';
+    ctx.beginPath(); ctx.ellipse(0, -wheelR*1.72, 14, 6, 0, 0, 2*Math.PI); ctx.fill();
+
+    // --- crank + pedals (animated) ---
+    const crankR = 14;
+    const px1 = Math.cos(phase) * crankR;
+    const py1 = Math.sin(phase) * crankR * 0.45;
+    const px2 = -px1, py2 = -py1;
+    // bottom bracket location
+    const bbY = -wheelR*0.85;
+    ctx.fillStyle = '#3a3a3a';
+    ctx.beginPath(); ctx.arc(0, bbY, 5, 0, 2*Math.PI); ctx.fill();
+    // crank arms
+    ctx.strokeStyle = '#222'; ctx.lineWidth = 4;
+    ctx.beginPath(); ctx.moveTo(0,bbY); ctx.lineTo(px1, bbY+py1); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0,bbY); ctx.lineTo(px2, bbY+py2); ctx.stroke();
+
+    // --- legs (very simple two-segment, follow pedals) ---
+    const hipY = -wheelR*1.55;
+    function leg(footX, footY, side){
+      const hipX = side*8;
+      // knee = midpoint pushed outward
+      const mx = (hipX+footX)/2 + side*8;
+      const my = (hipY+footY)/2 + 4;
+      ctx.strokeStyle = '#1f3b66'; ctx.lineWidth = 9; ctx.lineCap='round';
+      ctx.beginPath(); ctx.moveTo(hipX,hipY); ctx.lineTo(mx,my); ctx.lineTo(footX,footY); ctx.stroke();
+    }
+    leg(px1, bbY+py1, +1);
+    leg(px2, bbY+py2, -1);
+
+    // --- rider torso + jersey (rear view) ---
+    ctx.fillStyle = '#d83a3a';
+    ctx.beginPath();
+    ctx.moveTo(-22, hipY);
+    ctx.lineTo( 22, hipY);
+    ctx.lineTo( 18, hipY-46);
+    ctx.lineTo(-18, hipY-46);
+    ctx.closePath(); ctx.fill();
+    // jersey number-stripe
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(-3, hipY-44, 6, 42);
+
+    // --- arms reaching forward to bars ---
+    ctx.strokeStyle = '#d83a3a'; ctx.lineWidth = 7;
+    ctx.beginPath(); ctx.moveTo(-18, hipY-40); ctx.lineTo(-44, hipY-26); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo( 18, hipY-40); ctx.lineTo( 44, hipY-26); ctx.stroke();
+
+    // --- helmet ---
+    const headY = hipY-58;
+    ctx.fillStyle = '#1a1a1a';
+    ctx.beginPath(); ctx.ellipse(0, headY, 14, 12, 0, 0, 2*Math.PI); ctx.fill();
+    ctx.fillStyle = '#f0c14b';
+    ctx.fillRect(-12, headY-2, 24, 3);
+    // helmet vents
+    ctx.fillStyle = 'rgba(255,255,255,.15)';
+    for (let i=-2;i<=2;i++) ctx.fillRect(i*5-1, headY-9, 2, 5);
+
+    // --- handlebars (rotate with steer relative to bike) ---
+    ctx.save();
+    ctx.translate(0, hipY-26);
+    ctx.rotate(steer*0.3);
+    ctx.strokeStyle = '#0e0e10'; ctx.lineWidth = 6; ctx.lineCap='round';
+    ctx.beginPath(); ctx.moveTo(-50,0); ctx.lineTo(50,0); ctx.stroke();
+    // bar tape
+    ctx.strokeStyle = '#222'; ctx.lineWidth = 8;
+    ctx.beginPath(); ctx.moveTo(-50,0); ctx.lineTo(-38,2); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo( 50,0); ctx.lineTo( 38,2); ctx.stroke();
+    // brake hoods hint
+    ctx.fillStyle = '#222';
+    ctx.fillRect(-46,-3,8,8); ctx.fillRect(38,-3,8,8);
+    ctx.restore();
+
+    ctx.restore();
   }
 
   // ---------- Sampling ----------
