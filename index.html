@@ -72,6 +72,7 @@
       <div class="chip"><span>Time</span><b id="time">0:00</b></div>
       <div class="chip warn"><span>Lateral</span><b id="lat">0.0 m</b></div>
       <div class="chip" id="targetChip" style="display:none"><span>Target rpm</span><b id="targetRpm">70-90</b></div>
+      <div class="chip" id="srcChip"><span>Input</span><b id="srcLabel">Keyboard</b></div>
     </div>
     <div id="countdown" style="position:absolute;inset:0;display:none;align-items:center;justify-content:center;font-size:160px;font-weight:800;color:#fff;text-shadow:0 6px 30px rgba(0,0,0,.7);z-index:3;pointer-events:none"></div>
     <div id="segLabel">— ready —</div>
@@ -105,6 +106,14 @@
           <b>C — cadence target</b>: hold 70–90 rpm; live colour feedback.<br><br>
           7 segments · ~840 m · ~2 min · 10 Hz logging · per-cue reaction times.
         </p>
+        <p style="margin:14px 0 4px;font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)">Input source</p>
+        <p style="margin:0 0 8px;color:#c9d1d9;font-size:13px">Keyboard works out of the box. Plug in a USB gamepad and it's auto-detected. For an Arduino sending <code>pedal,steer,brake</code> lines at 115200 baud, click below.</p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="secondary" id="connectSerial" type="button">Connect USB (Web Serial)</button>
+          <button class="secondary" id="disconnectSerial" type="button" style="display:none">Disconnect</button>
+        </div>
+        <p id="serialStatus" style="margin:8px 0 0;font-size:12px;color:var(--muted)">Status: Keyboard</p>
+
         <div class="actions">
           <button id="startBtn">Begin Trial</button>
         </div>
@@ -151,7 +160,11 @@
         <tr><td>Wires, zip-ties, glue</td><td>$1</td></tr>
         <tfoot><tr><td>Total BOM</td><td>~$11</td></tr></tfoot>
       </table>
-      <p style="color:var(--muted);font-size:12px">Nano emulates a USB gamepad: cadence + steer as axes, brake as button. Browser sees it natively.</p>
+      <p style="color:var(--muted);font-size:12px">Two ways to talk to the sim:</p>
+      <ul style="color:var(--muted);font-size:12px;margin:4px 0 8px 18px;padding:0">
+        <li><b>USB gamepad (HID)</b> — Nano with HID firmware; auto-detected, no driver.</li>
+        <li><b>Serial</b> — print one line per frame at 115200 baud:<br><code style="color:#c9d1d9">pedal,steer,brake\n</code> (e.g. <code>1,-0.34,0</code>). Click "Connect USB" in the trial setup.</li>
+      </ul>
     </div>
 
     <h2 data-toggle="exp">Experiment Notes</h2>
@@ -190,6 +203,100 @@
   const keys = Object.create(null);
   addEventListener('keydown', e => { keys[e.code]=true; if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(e.code)) e.preventDefault(); });
   addEventListener('keyup',   e => { keys[e.code]=false; });
+
+  // ---------- External input layer (Gamepad / Web Serial) ----------
+  // Resolved per-frame into a unified Input{pedal,brake,steer-1..1}.
+  const Input = { source:'keyboard', pedal:false, brake:false, steer:0 };
+  const Serial = { port:null, reader:null, buffer:'', last:{p:0,s:0,b:0}, active:false };
+
+  function resolveInput(){
+    // 1) Web Serial overrides if active
+    if (Serial.active){
+      Input.source='serial';
+      Input.pedal = !!Serial.last.p;
+      Input.brake = !!Serial.last.b;
+      Input.steer = Math.max(-1, Math.min(1, +Serial.last.s||0));
+      return;
+    }
+    // 2) Gamepad if any axis/button is non-neutral
+    const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+    for (const gp of pads){
+      if (!gp) continue;
+      const ax0 = gp.axes[0]||0, ax1 = gp.axes[1]||0;
+      const btn0 = gp.buttons[0]?.pressed, btn1 = gp.buttons[1]?.pressed;
+      const trig = gp.buttons[7]?.value || 0; // right trigger as pedal
+      if (Math.abs(ax0)>0.08 || Math.abs(ax1)>0.08 || btn0 || btn1 || trig>0.05){
+        Input.source='gamepad';
+        Input.steer = Math.abs(ax0)>0.08 ? ax0 : 0;
+        Input.pedal = btn0 || trig>0.2;
+        Input.brake = btn1;
+        return;
+      }
+    }
+    // 3) Keyboard fallback
+    Input.source='keyboard';
+    Input.pedal = !!keys.ArrowUp;
+    Input.brake = !!keys.Space;
+    const sL=!!keys.ArrowLeft, sR=!!keys.ArrowRight;
+    Input.steer = (sR?1:0) - (sL?1:0); // discrete -1/0/1 from keys
+  }
+
+  // Web Serial connect — Arduino sends "p,s,b\n" lines at 115200.
+  async function connectSerial(){
+    if (!('serial' in navigator)){
+      $('serialStatus').textContent = 'Web Serial not supported in this browser. Use Chrome/Edge.';
+      return;
+    }
+    try{
+      const port = await navigator.serial.requestPort();
+      await port.open({ baudRate: 115200 });
+      Serial.port = port; Serial.active = true;
+      $('serialStatus').textContent = 'Status: Serial connected (waiting for data...)';
+      $('connectSerial').style.display='none';
+      $('disconnectSerial').style.display='';
+      const decoder = new TextDecoderStream();
+      const closed = port.readable.pipeTo(decoder.writable);
+      Serial.reader = decoder.readable.getReader();
+      readLoop();
+    } catch (err){
+      $('serialStatus').textContent = 'Status: Connect cancelled or failed (' + err.message + ')';
+    }
+  }
+  async function disconnectSerial(){
+    Serial.active = false;
+    try{ await Serial.reader?.cancel(); }catch{}
+    try{ await Serial.port?.close(); }catch{}
+    Serial.port = null; Serial.reader = null;
+    $('serialStatus').textContent = 'Status: Keyboard';
+    $('connectSerial').style.display='';
+    $('disconnectSerial').style.display='none';
+  }
+  async function readLoop(){
+    if (!Serial.reader) return;
+    try{
+      while (Serial.active){
+        const { value, done } = await Serial.reader.read();
+        if (done) break;
+        Serial.buffer += value;
+        let nl;
+        while ((nl = Serial.buffer.indexOf('\n')) >= 0){
+          const line = Serial.buffer.slice(0, nl).trim();
+          Serial.buffer = Serial.buffer.slice(nl+1);
+          const parts = line.split(',').map(Number);
+          if (parts.length >= 3 && parts.every(n=>!isNaN(n))){
+            Serial.last = { p: parts[0], s: parts[1], b: parts[2] };
+            $('serialStatus').textContent = `Status: Serial — p=${parts[0].toFixed(0)} s=${parts[1].toFixed(2)} b=${parts[2].toFixed(0)}`;
+          }
+        }
+      }
+    } catch(err){
+      $('serialStatus').textContent = 'Status: Serial error — ' + err.message;
+    }
+  }
+
+  addEventListener('gamepadconnected', e => {
+    $('serialStatus').textContent = 'Gamepad detected: ' + e.gamepad.id;
+  });
 
   // ---------- Track ----------
   // Each segment: length (m) + curvature (rad/m). Positive = right turn.
@@ -273,17 +380,24 @@
 
   // ---------- Sim step ----------
   function step(dt){
-    const pedaling=!!keys.ArrowUp, braking=!!keys.Space;
+    resolveInput();
+    const pedaling = Input.pedal, braking = Input.brake;
     if (braking)        S.speed -= BRAKE*dt;
     else if (pedaling)  S.speed += PEDAL*dt;
     else                S.speed -= COAST*dt;
     S.speed = Math.max(0, Math.min(MAX_SPEED, S.speed));
     S.cadence = pedaling ? Math.round((S.speed/7)*60) : Math.max(0, S.cadence - 60*dt);
 
-    const sL=!!keys.ArrowLeft, sR=!!keys.ArrowRight;
-    if (sL && !sR)      S.steer -= STEER_RATE*dt;
-    else if (sR && !sL) S.steer += STEER_RATE*dt;
-    else                S.steer -= Math.sign(S.steer)*Math.min(Math.abs(S.steer), STEER_RETURN*dt);
+    if (Input.source==='keyboard'){
+      // Discrete keys: integrate toward steer target
+      const tgt = Input.steer * STEER_MAX;
+      if (tgt !== 0) S.steer += Math.sign(tgt) * STEER_RATE * dt;
+      else           S.steer -= Math.sign(S.steer)*Math.min(Math.abs(S.steer), STEER_RETURN*dt);
+    } else {
+      // Analog axis: target steer directly, with mild smoothing
+      const tgt = Input.steer * STEER_MAX;
+      S.steer += (tgt - S.steer) * Math.min(1, dt*8);
+    }
     S.steer = Math.max(-STEER_MAX, Math.min(STEER_MAX, S.steer));
 
     // Distance + lateral motion. The track curvature changes the world's tangent;
@@ -685,6 +799,7 @@
     $('time').textContent=fmtTime(S.t);
     $('lat').textContent=S.lat.toFixed(1)+' m';
     $('progress').style.width=Math.min(100,(S.dist/TRACK_LEN)*100).toFixed(1)+'%';
+    $('srcLabel').textContent = Input.source.charAt(0).toUpperCase()+Input.source.slice(1);
 
     const segIdx=segAt(S.dist);
     const segType = TRACK[segIdx].curv===0 ? 'straight' : (TRACK[segIdx].curv>0?'right turn':'left turn');
@@ -771,6 +886,8 @@
   }
 
   $('startBtn').addEventListener('click', startTrial);
+  $('connectSerial').addEventListener('click', connectSerial);
+  $('disconnectSerial').addEventListener('click', disconnectSerial);
   $('restartBtn').addEventListener('click', () => {
     $('finish').classList.add('hidden');
     $('setup').classList.remove('hidden');
