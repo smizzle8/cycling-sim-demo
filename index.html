@@ -190,13 +190,13 @@
   // ---------- Track ----------
   // Each segment: length (m) + curvature (rad/m). Positive = right turn.
   const TRACK = [
-    { len:120, curv: 0      },
-    { len:80,  curv: 0.018  }, // right
     { len:140, curv: 0      },
-    { len:80,  curv:-0.018  }, // left
-    { len:100, curv: 0      },
-    { len:80,  curv: 0.022  }, // right (sharper)
-    { len:100, curv: 0      },
+    { len:90,  curv: 0.011  }, // gentle right
+    { len:160, curv: 0      },
+    { len:90,  curv:-0.011  }, // gentle left
+    { len:120, curv: 0      },
+    { len:90,  curv: 0.013  }, // moderate right
+    { len:120, curv: 0      },
   ];
   const TRACK_LEN = TRACK.reduce((a,s)=>a+s.len,0);
   const SEG_END = []; { let acc=0; TRACK.forEach(s=>{acc+=s.len; SEG_END.push(acc);}); }
@@ -235,10 +235,11 @@
 
   // ---------- Tunables ----------
   const MAX_SPEED=14, PEDAL=3.0, COAST=0.5, BRAKE=6.0;
-  const STEER_RATE=1.6, STEER_RETURN=2.2, STEER_MAX=0.55;
-  const STEER_GAIN=0.12;            // rad/s heading change per (rad steer * m/s)
-  const ROAD_HALF=2.5;              // metres half-width of road
-  const ROAD_HALF_NARROW=1.6;       // condition B
+  const STEER_RATE=1.1, STEER_RETURN=2.6, STEER_MAX=0.55;
+  const STEER_GAIN=0.22;            // rad/s heading change per (rad steer * m/s) — more authority
+  const ROAD_HALF=3.2;              // metres half-width of road (wider, easier)
+  const ROAD_HALF_NARROW=2.2;       // condition B
+  const RECOVERY=0.35;              // gentle pull back toward centerline (assist)
   const TIMEOUT_S=180, SAMPLE_HZ=10;
 
   function roadHalfWidth(){ return S.cond==='B' ? ROAD_HALF_NARROW : ROAD_HALF; }
@@ -268,6 +269,11 @@
     // forward progress + lateral drift
     S.dist += S.speed * Math.cos(S.relHead) * dt;
     S.lat  += S.speed * Math.sin(S.relHead) * dt;
+    // mild auto-recovery: damp lateral drift when on road, so straight-line riding stays straight
+    if (Math.abs(S.lat) <= roadHalfWidth()){
+      S.lat *= Math.pow(0.85, dt * RECOVERY * 4);
+      S.relHead *= Math.pow(0.6, dt);
+    }
 
     // Off road effect: penalise speed and count time
     const half = roadHalfWidth();
@@ -380,6 +386,24 @@
     ctx.fillStyle='#444'; roundRect(gx-gw/2,gy,gw,gh,4); ctx.fill();
     const sxp = gx + (S.steer/STEER_MAX)*(gw/2);
     ctx.fillStyle='#3fb950'; roundRect(sxp-3,gy-2,6,gh+4,3); ctx.fill();
+
+    // Lane-position bar (bottom center): shows where the bike is relative to the road
+    const lx=W/2, ly=H-110, lw=240, lh=10;
+    ctx.fillStyle='rgba(0,0,0,.45)'; roundRect(lx-lw/2-6, ly-6, lw+12, lh+12, 8); ctx.fill();
+    // road area
+    ctx.fillStyle='#2f6b2f'; roundRect(lx-lw/2, ly, lw, lh, 5); ctx.fill();
+    // safe zone (within road half-width)
+    const half = roadHalfWidth();
+    const safePx = (half / (half*1.6)) * (lw/2);
+    ctx.fillStyle='#3fb950'; ctx.fillRect(lx-safePx, ly+1, safePx*2, lh-2);
+    // bike marker (clamped for display)
+    const latNorm = Math.max(-1, Math.min(1, S.lat/(half*1.6)));
+    const mx = lx + latNorm*(lw/2);
+    const offRoad = Math.abs(S.lat) > half;
+    ctx.fillStyle = offRoad ? '#f85149' : '#fff';
+    roundRect(mx-4, ly-3, 8, lh+6, 4); ctx.fill();
+    // tick at center
+    ctx.fillStyle='rgba(255,255,255,.5)'; ctx.fillRect(lx-1, ly-2, 2, lh+4);
   }
   function roundRect(x,y,w,h,r){
     ctx.beginPath();
@@ -560,7 +584,7 @@
 
     const turn = nextTurn(S.dist);
     const cueEl=$('cue');
-    if (turn && turn.distAhead <= 30){
+    if (turn && turn.distAhead <= 60){
       cueEl.textContent = turn.dir==='left' ? '←' : '→';
       cueEl.classList.add('show');
     } else if (TRACK[segIdx].curv !== 0){
