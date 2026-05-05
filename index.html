@@ -3,32 +3,61 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Cycling Sim Demo</title>
+<title>Cycling Sim — Trial</title>
 <style>
   :root{
     --bg:#0e1116; --panel:#161b22; --ink:#e6edf3; --muted:#8b949e;
-    --accent:#3fb950; --warn:#d29922; --line:#30363d;
+    --accent:#3fb950; --warn:#d29922; --danger:#f85149; --line:#30363d;
   }
   *{box-sizing:border-box}
   html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);font:14px/1.4 system-ui,Segoe UI,Roboto,sans-serif}
+  button{font:inherit;cursor:pointer;background:var(--accent);color:#0b0f14;border:0;border-radius:6px;padding:10px 16px;font-weight:600}
+  button.secondary{background:#21262d;color:var(--ink);border:1px solid var(--line)}
+  input,select{font:inherit;background:#0b0f14;color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:8px 10px}
+  label{display:block;margin:10px 0 4px;color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.06em}
   #app{display:grid;grid-template-columns:1fr 320px;grid-template-rows:1fr;height:100%}
-  #stage{position:relative;overflow:hidden;background:linear-gradient(#87ceeb 0 55%,#6b8e23 55% 60%,#3a3a3a 60% 100%)}
+  #stage{position:relative;overflow:hidden}
   canvas{display:block;width:100%;height:100%}
-  #hud{position:absolute;top:12px;left:12px;display:flex;gap:8px;flex-wrap:wrap}
+  #hud{position:absolute;top:12px;left:12px;display:flex;gap:8px;flex-wrap:wrap;z-index:2}
   .chip{background:rgba(0,0,0,.55);padding:8px 12px;border-radius:8px;font-variant-numeric:tabular-nums;min-width:96px}
   .chip b{display:block;font-size:18px;color:var(--accent)}
   .chip span{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}
-  #help{position:absolute;bottom:12px;left:12px;background:rgba(0,0,0,.55);padding:8px 12px;border-radius:8px;color:var(--muted)}
-  #help kbd{background:#222;border:1px solid #444;border-radius:4px;padding:1px 6px;color:#eee;font-family:inherit;font-size:12px}
+  .chip.warn b{color:var(--warn)}
+  #progressWrap{position:absolute;left:12px;right:12px;bottom:54px;height:8px;background:rgba(0,0,0,.45);border-radius:4px;overflow:hidden;z-index:2}
+  #progress{height:100%;width:0;background:linear-gradient(90deg,var(--accent),#7ee2a0)}
+  #help{position:absolute;bottom:12px;left:12px;background:rgba(0,0,0,.55);padding:8px 12px;border-radius:8px;color:var(--muted);z-index:2}
+  #help kbd{background:#222;border:1px solid #444;border-radius:4px;padding:1px 6px;color:#eee;font-size:12px}
+  #cue{position:absolute;top:64px;left:50%;transform:translateX(-50%);font-size:120px;line-height:1;color:#fff;text-shadow:0 4px 18px rgba(0,0,0,.7);opacity:0;transition:opacity .25s;z-index:2;pointer-events:none}
+  #cue.show{opacity:1}
+  #segLabel{position:absolute;top:14px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.55);padding:6px 14px;border-radius:999px;color:var(--muted);font-size:12px;letter-spacing:.08em;text-transform:uppercase;z-index:2}
+  #offWarn{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(248,81,73,.85);color:#fff;padding:8px 16px;border-radius:8px;font-weight:600;z-index:2;display:none}
+
   aside{background:var(--panel);border-left:1px solid var(--line);padding:16px;overflow:auto}
   aside h1{font-size:14px;margin:0 0 4px;letter-spacing:.04em;text-transform:uppercase;color:var(--muted)}
-  aside h2{font-size:13px;margin:18px 0 6px;color:var(--accent);text-transform:uppercase;letter-spacing:.06em}
+  aside h2{font-size:13px;margin:18px 0 6px;color:var(--accent);text-transform:uppercase;letter-spacing:.06em;cursor:pointer;user-select:none}
+  aside h2::before{content:'▸ ';font-size:10px;color:var(--muted)}
+  aside h2.open::before{content:'▾ '}
+  aside .sect{display:none}
+  aside .sect.open{display:block}
   aside p{margin:6px 0;color:#c9d1d9}
   table{width:100%;border-collapse:collapse;font-size:13px}
   td{padding:4px 0;border-bottom:1px dashed var(--line)}
   td:last-child{text-align:right;color:var(--muted);font-variant-numeric:tabular-nums}
   tfoot td{border:0;padding-top:8px;color:var(--accent);font-weight:600}
   .pill{display:inline-block;background:#21262d;border:1px solid var(--line);border-radius:999px;padding:2px 8px;font-size:11px;color:var(--muted);margin-right:4px}
+
+  .overlay{position:absolute;inset:0;background:rgba(8,10,14,.85);backdrop-filter:blur(4px);display:flex;align-items:center;justify-content:center;z-index:10}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:24px;width:min(440px,90%);max-height:90%;overflow:auto}
+  .card h2{margin:0 0 4px;font-size:18px}
+  .card p.lead{color:var(--muted);margin:0 0 16px}
+  .row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .slider-row{margin:10px 0}
+  .slider-row .lbl{display:flex;justify-content:space-between;font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+  input[type=range]{width:100%}
+  .stats{font-size:13px;color:var(--muted);margin:12px 0}
+  .stats b{color:var(--ink)}
+  .actions{display:flex;gap:8px;justify-content:flex-end;margin-top:16px}
+  .hidden{display:none !important}
 </style>
 </head>
 <body>
@@ -38,37 +67,94 @@
     <div id="hud">
       <div class="chip"><span>Speed</span><b id="kmh">0.0</b></div>
       <div class="chip"><span>Cadence</span><b id="rpm">0</b></div>
-      <div class="chip"><span>Steer</span><b id="steer">0&deg;</b></div>
-      <div class="chip"><span>Distance</span><b id="dist">0 m</b></div>
+      <div class="chip"><span>Steer</span><b id="steer">0°</b></div>
+      <div class="chip"><span>Time</span><b id="time">0:00</b></div>
+      <div class="chip warn"><span>Lateral</span><b id="lat">0.0 m</b></div>
     </div>
-    <div id="help">
-      <kbd>&uarr;</kbd> pedal &nbsp; <kbd>&larr;</kbd>/<kbd>&rarr;</kbd> steer &nbsp; <kbd>Space</kbd> brake
+    <div id="segLabel">— ready —</div>
+    <div id="cue">↑</div>
+    <div id="offWarn">OFF ROAD</div>
+    <div id="progressWrap"><div id="progress"></div></div>
+    <div id="help"><kbd>↑</kbd> pedal &nbsp; <kbd>←</kbd>/<kbd>→</kbd> steer &nbsp; <kbd>Space</kbd> brake</div>
+
+    <div class="overlay" id="setup">
+      <div class="card">
+        <h2>Cycling Trial</h2>
+        <p class="lead">~2-min track. Follow the arrows — the road bends; your steering must match.</p>
+        <div class="row">
+          <div>
+            <label for="pid">Participant #</label>
+            <input id="pid" type="number" min="1" value="1" />
+          </div>
+          <div>
+            <label for="cond">Condition</label>
+            <select id="cond">
+              <option value="A">A — baseline</option>
+              <option value="B">B — narrow road</option>
+              <option value="C">C — fast cadence target</option>
+            </select>
+          </div>
+        </div>
+        <p class="stats" style="margin-top:14px">
+          7 segments · ~700 m · ~2 min at moderate effort.<br>
+          Sampling 10 Hz · CSV at end · NASA-TLX-lite.
+        </p>
+        <div class="actions">
+          <button id="startBtn">Begin Trial</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="overlay hidden" id="finish">
+      <div class="card">
+        <h2>Trial complete</h2>
+        <p class="lead" id="finishStats">—</p>
+        <p style="margin:14px 0 4px;font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)">Subjective ratings (NASA-TLX-lite, 0–20)</p>
+        <div class="slider-row"><div class="lbl"><span>Mental demand</span><span id="vMental">10</span></div><input type="range" id="rMental" min="0" max="20" value="10"></div>
+        <div class="slider-row"><div class="lbl"><span>Physical demand</span><span id="vPhys">10</span></div><input type="range" id="rPhys" min="0" max="20" value="10"></div>
+        <div class="slider-row"><div class="lbl"><span>Frustration</span><span id="vFrus">10</span></div><input type="range" id="rFrus" min="0" max="20" value="10"></div>
+        <div class="slider-row"><div class="lbl"><span>Perceived realism</span><span id="vReal">10</span></div><input type="range" id="rReal" min="0" max="20" value="10"></div>
+        <div class="actions">
+          <button class="secondary" id="restartBtn">New trial</button>
+          <button id="downloadBtn">Download CSV</button>
+        </div>
+      </div>
     </div>
   </div>
 
   <aside>
-    <h1>Cycling Sim Demo</h1>
-    <p style="color:var(--muted)">Keyboard now &mdash; cheap hardware later.</p>
+    <h1>Cycling Sim — Trial Build</h1>
+    <p style="color:var(--muted)">G2 hardware · G1 trial logic · G3 instrumentation.</p>
 
-    <h2>Hardware Concept</h2>
-    <p>Three signals are enough for a convincing ride. Keep it dumb, keep it cheap.</p>
-    <table>
-      <tr><td>Reed switch + wheel magnet <span class="pill">longitudinal</span></td><td>$2</td></tr>
-      <tr><td>10k&Omega; potentiometer on stem <span class="pill">lateral</span></td><td>$2</td></tr>
-      <tr><td>Brake-lever microswitch</td><td>$1</td></tr>
-      <tr><td>Arduino Nano clone (USB HID)</td><td>$5</td></tr>
-      <tr><td>Wires, zip-ties, hot-glue</td><td>$1</td></tr>
-      <tfoot><tr><td>Total BOM</td><td>~$11</td></tr></tfoot>
-    </table>
-    <p style="color:var(--muted);font-size:12px;margin-top:8px">
-      No smart trainer, no VR headset, no proprietary protocol. Mounts on any bike on any trainer
-      &mdash; or even a stationary stand. The Nano emulates a USB gamepad so the browser sees
-      pedal cadence, steer angle, and brake as standard axes/buttons.
-    </p>
+    <h2 class="open" data-toggle="trial">Trial</h2>
+    <div class="sect open" id="sect-trial">
+      <p><b>Track:</b> straights + signed turns with curvature; arrow cue 30 m before each turn.</p>
+      <p><b>World rotates:</b> as the track curves, the road bends on screen — match it with steer.</p>
+      <p><b>Stop:</b> auto at finish line, or 3:00 timeout.</p>
+      <p><b>Logged @10 Hz:</b> t, pid, cond, speed, cadence, steer, dist, lat_offset, segment, cue, brake, off_road.</p>
+    </div>
 
-    <h2>Why this works</h2>
-    <p>Pedal pulses &rarr; speed integration. Pot voltage &rarr; steer angle. Brake closes a
-    contact. The sim does the physics; the bike just reports what the rider is doing.</p>
+    <h2 data-toggle="hw">Hardware Concept</h2>
+    <div class="sect" id="sect-hw">
+      <p>Three signals are enough. Keep it dumb, keep it cheap.</p>
+      <table>
+        <tr><td>Reed switch + wheel magnet <span class="pill">longitudinal</span></td><td>$2</td></tr>
+        <tr><td>10kΩ pot on stem <span class="pill">lateral</span></td><td>$2</td></tr>
+        <tr><td>Brake-lever microswitch</td><td>$1</td></tr>
+        <tr><td>Arduino Nano (USB-HID)</td><td>$5</td></tr>
+        <tr><td>Wires, zip-ties, glue</td><td>$1</td></tr>
+        <tfoot><tr><td>Total BOM</td><td>~$11</td></tr></tfoot>
+      </table>
+      <p style="color:var(--muted);font-size:12px">Nano emulates a USB gamepad: cadence + steer as axes, brake as button. Browser sees it natively.</p>
+    </div>
+
+    <h2 data-toggle="exp">Experiment Notes</h2>
+    <div class="sect" id="sect-exp">
+      <p><b>Design:</b> within-subjects, 3 conditions × counter-balanced order, 2 trials each.</p>
+      <p><b>Comparable to:</b> de Winter et al. (bike-sim validity); O'Hern bicycle simulator review.</p>
+      <p><b>Extra parameters:</b> cue reaction time, lateral RMS error, off-road duration, brake events, steer-reversal rate.</p>
+      <p><b>Subjective:</b> NASA-TLX, SSQ (sim sickness), single-item realism.</p>
+    </div>
   </aside>
 </div>
 
@@ -76,122 +162,211 @@
 (() => {
   const cv = document.getElementById('c');
   const ctx = cv.getContext('2d');
-  const kmhEl = document.getElementById('kmh');
-  const rpmEl = document.getElementById('rpm');
-  const steerEl = document.getElementById('steer');
-  const distEl = document.getElementById('dist');
+  const $ = id => document.getElementById(id);
 
-  let W = 0, H = 0, dpr = Math.min(2, devicePixelRatio || 1);
+  document.querySelectorAll('aside h2[data-toggle]').forEach(h => {
+    h.addEventListener('click', () => {
+      const id='sect-'+h.dataset.toggle;
+      h.classList.toggle('open');
+      $(id).classList.toggle('open');
+    });
+  });
+
+  let W=0,H=0, dpr=Math.min(2,devicePixelRatio||1);
   function resize(){
     const r = cv.getBoundingClientRect();
-    W = r.width; H = r.height;
-    cv.width = W * dpr; cv.height = H * dpr;
+    W=r.width; H=r.height;
+    cv.width=W*dpr; cv.height=H*dpr;
     ctx.setTransform(dpr,0,0,dpr,0,0);
   }
-  addEventListener('resize', resize); resize();
+  addEventListener('resize',resize); resize();
 
-  // State
   const keys = Object.create(null);
-  addEventListener('keydown', e => { keys[e.code] = true; if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(e.code)) e.preventDefault(); });
-  addEventListener('keyup',   e => { keys[e.code] = false; });
+  addEventListener('keydown', e => { keys[e.code]=true; if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(e.code)) e.preventDefault(); });
+  addEventListener('keyup',   e => { keys[e.code]=false; });
 
-  let speed = 0;       // m/s
-  let cadence = 0;     // rpm
-  let steer = 0;       // radians, -0.6..0.6
-  let dist = 0;        // m
-  let heading = 0;     // for lean visual
-  let last = performance.now();
+  // ---------- Track ----------
+  // Each segment: length (m) + curvature (rad/m). Positive = right turn.
+  const TRACK = [
+    { len:120, curv: 0      },
+    { len:80,  curv: 0.018  }, // right
+    { len:140, curv: 0      },
+    { len:80,  curv:-0.018  }, // left
+    { len:100, curv: 0      },
+    { len:80,  curv: 0.022  }, // right (sharper)
+    { len:100, curv: 0      },
+  ];
+  const TRACK_LEN = TRACK.reduce((a,s)=>a+s.len,0);
+  const SEG_END = []; { let acc=0; TRACK.forEach(s=>{acc+=s.len; SEG_END.push(acc);}); }
 
-  // Tunables
-  const MAX_SPEED = 14;       // ~50 km/h
-  const PEDAL_ACCEL = 3.0;    // m/s^2 while pedaling
-  const COAST_DECEL = 0.5;    // m/s^2 rolling resistance
-  const BRAKE_DECEL = 6.0;    // m/s^2
-  const STEER_RATE  = 1.6;    // rad/s
-  const STEER_RETURN = 2.2;   // self-centering
-  const STEER_MAX = 0.55;
-
-  function step(dt){
-    // Longitudinal
-    const pedaling = !!keys.ArrowUp;
-    const braking  = !!keys.Space;
-    if (braking)        speed -= BRAKE_DECEL * dt;
-    else if (pedaling)  speed += PEDAL_ACCEL * dt;
-    else                speed -= COAST_DECEL * dt;
-    speed = Math.max(0, Math.min(MAX_SPEED, speed));
-
-    // Cadence: assume 7m development per crank rev at top gear → rpm = (speed/7)*60
-    cadence = pedaling ? Math.round((speed / 7) * 60) : Math.max(0, cadence - 60*dt);
-
-    // Lateral
-    const sL = !!keys.ArrowLeft, sR = !!keys.ArrowRight;
-    if (sL && !sR)      steer -= STEER_RATE * dt;
-    else if (sR && !sL) steer += STEER_RATE * dt;
-    else                steer -= Math.sign(steer) * Math.min(Math.abs(steer), STEER_RETURN * dt);
-    steer = Math.max(-STEER_MAX, Math.min(STEER_MAX, steer));
-
-    // Heading (just for road sway visual). At low speed, steer has less effect.
-    heading += steer * speed * 0.06 * dt;
-    heading *= 0.985; // drift back to straight
-
-    dist += speed * dt;
+  function segAt(d){
+    for (let i=0;i<SEG_END.length;i++) if (d < SEG_END[i]) return i;
+    return TRACK.length-1;
+  }
+  function curvAt(d){
+    if (d >= TRACK_LEN) return 0;
+    return TRACK[segAt(d)].curv;
+  }
+  function nextTurn(d){
+    // Returns {dir, distAhead} for the next non-zero-curv segment, else null
+    let acc = SEG_END[segAt(d)] - d; // remainder of current
+    for (let i=segAt(d)+1; i<TRACK.length; i++){
+      if (TRACK[i].curv !== 0) return { dir: TRACK[i].curv>0?'right':'left', distAhead: acc };
+      acc += TRACK[i].len;
+    }
+    return null;
   }
 
-  // Render: faux 3D scrolling road
+  // ---------- State ----------
+  const S = {
+    running:false, finished:false,
+    pid:1, cond:'A',
+    t0:0, t:0,
+    speed:0, cadence:0, steer:0,
+    dist:0,           // distance along track (m)
+    lat:0,            // lateral offset from centerline (m), + = right
+    relHead:0,        // bike heading relative to track tangent (rad)
+    brakeEvents:0, prevBrake:false, offRoadTime:0,
+    samples:[]
+  };
+
+  // ---------- Tunables ----------
+  const MAX_SPEED=14, PEDAL=3.0, COAST=0.5, BRAKE=6.0;
+  const STEER_RATE=1.6, STEER_RETURN=2.2, STEER_MAX=0.55;
+  const STEER_GAIN=0.12;            // rad/s heading change per (rad steer * m/s)
+  const ROAD_HALF=2.5;              // metres half-width of road
+  const ROAD_HALF_NARROW=1.6;       // condition B
+  const TIMEOUT_S=180, SAMPLE_HZ=10;
+
+  function roadHalfWidth(){ return S.cond==='B' ? ROAD_HALF_NARROW : ROAD_HALF; }
+
+  // ---------- Sim step ----------
+  function step(dt){
+    const pedaling=!!keys.ArrowUp, braking=!!keys.Space;
+    if (braking)        S.speed -= BRAKE*dt;
+    else if (pedaling)  S.speed += PEDAL*dt;
+    else                S.speed -= COAST*dt;
+    S.speed = Math.max(0, Math.min(MAX_SPEED, S.speed));
+    S.cadence = pedaling ? Math.round((S.speed/7)*60) : Math.max(0, S.cadence - 60*dt);
+
+    const sL=!!keys.ArrowLeft, sR=!!keys.ArrowRight;
+    if (sL && !sR)      S.steer -= STEER_RATE*dt;
+    else if (sR && !sL) S.steer += STEER_RATE*dt;
+    else                S.steer -= Math.sign(S.steer)*Math.min(Math.abs(S.steer), STEER_RETURN*dt);
+    S.steer = Math.max(-STEER_MAX, Math.min(STEER_MAX, S.steer));
+
+    // Distance + lateral motion. The track curvature changes the world's tangent;
+    // the rider's steering changes the bike heading. Mismatch ⇒ lateral drift.
+    const k = curvAt(S.dist);             // rad/m of track
+    const trackTurn = k * S.speed;        // rad/s the world is rotating beneath us
+    const bikeTurn  = STEER_GAIN * S.steer * S.speed; // rad/s
+    S.relHead += (bikeTurn - trackTurn) * dt;
+    S.relHead = Math.max(-1.0, Math.min(1.0, S.relHead));
+    // forward progress + lateral drift
+    S.dist += S.speed * Math.cos(S.relHead) * dt;
+    S.lat  += S.speed * Math.sin(S.relHead) * dt;
+
+    // Off road effect: penalise speed and count time
+    const half = roadHalfWidth();
+    const off = Math.abs(S.lat) > half;
+    if (off){ S.speed *= Math.pow(0.5, dt); S.offRoadTime += dt; }
+
+    if (braking && !S.prevBrake) S.brakeEvents++;
+    S.prevBrake = braking;
+  }
+
+  // ---------- Render ----------
+  // Outrun-style curving road built from look-ahead curvature.
   function draw(){
     ctx.clearRect(0,0,W,H);
 
-    // Sky
-    const skyGrad = ctx.createLinearGradient(0,0,0,H*0.6);
-    skyGrad.addColorStop(0,'#7ec8ff'); skyGrad.addColorStop(1,'#cfe9ff');
-    ctx.fillStyle = skyGrad; ctx.fillRect(0,0,W,H*0.6);
+    // Sky + ground
+    const sky = ctx.createLinearGradient(0,0,0,H*0.55);
+    sky.addColorStop(0,'#7ec8ff'); sky.addColorStop(1,'#cfe9ff');
+    ctx.fillStyle=sky; ctx.fillRect(0,0,W,H*0.55);
+    ctx.fillStyle='#5d8a2f'; ctx.fillRect(0,H*0.55,W,H*0.45);
 
-    // Ground
-    ctx.fillStyle = '#5d8a2f'; ctx.fillRect(0,H*0.6,W,H*0.4);
+    // Look-ahead road. We render N horizontal slices from horizon down.
+    // Each slice corresponds to a road distance ahead and has an x-offset accumulated
+    // from sampled track curvature ahead of the rider.
+    const horizonY = H*0.55;
+    const roadHalf = roadHalfWidth();
+    const SLICES = 80;
+    const LOOKAHEAD = 90;          // metres of road visible
+    const dStep = LOOKAHEAD/SLICES;
+    let cumOffsetX = 0;            // px
+    let cumDx = 0;                 // accumulated curvature * step
+    const slices = [];
+    for (let i=0;i<SLICES;i++){
+      const dAhead = i*dStep;
+      const k = curvAt(S.dist + dAhead);
+      // accumulate curvature twice for x offset (integral of integral) — Outrun trick
+      cumDx += k * dStep;
+      cumOffsetX += cumDx * dStep * 18; // visual scale
+      // perspective: t=0 horizon, t=1 near
+      const t = i/SLICES;
+      const yTop = horizonY + (1-Math.pow(1-t,2)) * (H-horizonY);  // bias toward near
+      const persp = 0.06 + 0.94*(t*t);  // wider as we get nearer
+      const cx = W/2 + cumOffsetX*persp - S.lat*persp*40;          // shift by lateral
+      const halfPx = roadHalf * persp * 60;
+      slices.push({y:yTop, cx, halfPx, t, dAhead});
+    }
+    // Draw road as filled polygon between consecutive slices
+    for (let i=0;i<slices.length-1;i++){
+      const a = slices[i], b = slices[i+1];
+      // alternating shoulder colour for depth
+      ctx.fillStyle = (Math.floor((S.dist+a.dAhead)/4) % 2 === 0) ? '#3a3a3a' : '#363636';
+      ctx.beginPath();
+      ctx.moveTo(a.cx-a.halfPx, a.y);
+      ctx.lineTo(a.cx+a.halfPx, a.y);
+      ctx.lineTo(b.cx+b.halfPx, b.y);
+      ctx.lineTo(b.cx-b.halfPx, b.y);
+      ctx.closePath(); ctx.fill();
 
-    // Road: trapezoid that sways with heading
-    const horizonY = H*0.6;
-    const cx = W/2 + Math.sin(heading) * W * 0.25;
-    const roadTopW = W*0.08, roadBotW = W*0.9;
-    ctx.fillStyle = '#3a3a3a';
-    ctx.beginPath();
-    ctx.moveTo(cx - roadTopW/2, horizonY);
-    ctx.lineTo(cx + roadTopW/2, horizonY);
-    ctx.lineTo(W/2 + roadBotW/2, H);
-    ctx.lineTo(W/2 - roadBotW/2, H);
-    ctx.closePath(); ctx.fill();
+      // shoulders (rumble strips)
+      ctx.fillStyle = (Math.floor((S.dist+a.dAhead)/4) % 2 === 0) ? '#cf3838' : '#f0f0f0';
+      const shW = Math.max(2, a.halfPx*0.08);
+      ctx.fillRect(a.cx-a.halfPx-shW, a.y-1, shW, b.y-a.y+2);
+      ctx.fillRect(a.cx+a.halfPx,    a.y-1, shW, b.y-a.y+2);
 
-    // Dashed centerline, scrolls with distance
-    ctx.strokeStyle = '#f5d142'; ctx.lineWidth = 4;
-    const dashes = 14;
-    const phase = (dist * 4) % 1;
-    for (let i=0;i<dashes;i++){
-      const t0 = (i + phase)/dashes;
-      const t1 = t0 + 0.5/dashes;
-      if (t1 > 1) continue;
-      const p0x = lerp(cx, W/2, t0), p0y = lerp(horizonY, H, t0);
-      const p1x = lerp(cx, W/2, t1), p1y = lerp(horizonY, H, t1);
-      ctx.beginPath(); ctx.moveTo(p0x,p0y); ctx.lineTo(p1x,p1y); ctx.stroke();
+      // centerline dashes
+      if (Math.floor((S.dist+a.dAhead)/3) % 2 === 0){
+        ctx.fillStyle = '#f5d142';
+        const cW = Math.max(2, a.halfPx*0.04);
+        ctx.fillRect(a.cx-cW/2, a.y, cW, b.y-a.y+1);
+      }
     }
 
-    // Handlebar / lean indicator (foreground)
+    // Finish line near end
+    const remaining = TRACK_LEN - S.dist;
+    if (remaining > 0 && remaining < LOOKAHEAD){
+      // find slice at that dAhead
+      const idx = Math.min(slices.length-1, Math.floor(remaining/dStep));
+      const sl = slices[idx];
+      const sq = Math.max(6, sl.halfPx*0.18);
+      for (let i=-4;i<=4;i++){
+        ctx.fillStyle = (i)%2===0 ? '#fff' : '#111';
+        ctx.fillRect(sl.cx + i*sq - sq/2, sl.y - sq, sq, sq);
+      }
+    }
+
+    // Foreground bike (handlebars rotate with steer; bike body stays centered)
+    const bx = W/2, by = H-70;
     ctx.save();
-    ctx.translate(W/2, H - 70);
-    ctx.rotate(steer * 0.6);
-    ctx.fillStyle = '#111'; ctx.fillRect(-140, -8, 280, 16);
-    ctx.fillStyle = '#222'; ctx.fillRect(-150, -14, 12, 28);
-    ctx.fillStyle = '#222'; ctx.fillRect( 138, -14, 12, 28);
+    ctx.translate(bx, by);
+    ctx.rotate(S.steer*0.6);
+    ctx.fillStyle='#111'; ctx.fillRect(-140,-8,280,16);
+    ctx.fillStyle='#222'; ctx.fillRect(-150,-14,12,28);
+    ctx.fillStyle='#222'; ctx.fillRect( 138,-14,12,28);
     ctx.restore();
 
-    // Steer gauge (top-center)
-    const gx = W/2, gy = 24, gw = 160, gh = 8;
-    ctx.fillStyle = 'rgba(0,0,0,.35)'; roundRect(gx-gw/2-6, gy-6, gw+12, gh+12, 8); ctx.fill();
-    ctx.fillStyle = '#444'; roundRect(gx-gw/2, gy, gw, gh, 4); ctx.fill();
-    const sx = gx + (steer/STEER_MAX) * (gw/2);
-    ctx.fillStyle = '#3fb950'; roundRect(sx-3, gy-2, 6, gh+4, 3); ctx.fill();
+    // Lean tilt indicator (top center, mirrors steer)
+    const gx=W/2, gy=44, gw=160, gh=8;
+    ctx.fillStyle='rgba(0,0,0,.35)'; roundRect(gx-gw/2-6,gy-6,gw+12,gh+12,8); ctx.fill();
+    ctx.fillStyle='#444'; roundRect(gx-gw/2,gy,gw,gh,4); ctx.fill();
+    const sxp = gx + (S.steer/STEER_MAX)*(gw/2);
+    ctx.fillStyle='#3fb950'; roundRect(sxp-3,gy-2,6,gh+4,3); ctx.fill();
   }
-
-  function lerp(a,b,t){ return a + (b-a)*t; }
   function roundRect(x,y,w,h,r){
     ctx.beginPath();
     ctx.moveTo(x+r,y);
@@ -202,15 +377,145 @@
     ctx.closePath();
   }
 
+  // ---------- Sampling ----------
+  let lastSample = 0;
+  function maybeSample(now){
+    if (!S.running) return;
+    if (now - lastSample < 1000/SAMPLE_HZ) return;
+    lastSample = now;
+    const segIdx = segAt(S.dist);
+    const turn = nextTurn(S.dist);
+    const cue = (turn && turn.distAhead <= 30) ? turn.dir
+              : (TRACK[segIdx].curv !== 0 ? (TRACK[segIdx].curv>0?'right':'left') : '');
+    const offRoad = Math.abs(S.lat) > roadHalfWidth() ? 1 : 0;
+    S.samples.push({
+      t:+S.t.toFixed(2), pid:S.pid, cond:S.cond,
+      speed_kmh:+(S.speed*3.6).toFixed(2),
+      cadence_rpm:S.cadence|0,
+      steer_deg:+(S.steer*180/Math.PI).toFixed(2),
+      dist_m:+S.dist.toFixed(2),
+      lat_offset_m:+S.lat.toFixed(3),
+      segment:segIdx,
+      seg_curv: TRACK[segIdx].curv,
+      cue, off_road:offRoad,
+      brake: keys.Space?1:0
+    });
+  }
+
+  // ---------- HUD ----------
+  function fmtTime(s){ const m=Math.floor(s/60), x=Math.floor(s%60); return m+':'+(x<10?'0':'')+x; }
+  function updateHUD(){
+    $('kmh').textContent=(S.speed*3.6).toFixed(1);
+    $('rpm').textContent=S.cadence|0;
+    $('steer').textContent=(S.steer*180/Math.PI).toFixed(0)+'°';
+    $('time').textContent=fmtTime(S.t);
+    $('lat').textContent=S.lat.toFixed(1)+' m';
+    $('progress').style.width=Math.min(100,(S.dist/TRACK_LEN)*100).toFixed(1)+'%';
+
+    const segIdx=segAt(S.dist);
+    const segType = TRACK[segIdx].curv===0 ? 'straight' : (TRACK[segIdx].curv>0?'right turn':'left turn');
+    $('segLabel').textContent=`Segment ${segIdx+1}/${TRACK.length} · ${segType}`;
+
+    const turn = nextTurn(S.dist);
+    const cueEl=$('cue');
+    if (turn && turn.distAhead <= 30){
+      cueEl.textContent = turn.dir==='left' ? '←' : '→';
+      cueEl.classList.add('show');
+    } else if (TRACK[segIdx].curv !== 0){
+      cueEl.textContent = TRACK[segIdx].curv>0?'→':'←';
+      cueEl.classList.add('show');
+    } else cueEl.classList.remove('show');
+
+    $('offWarn').style.display = (Math.abs(S.lat) > roadHalfWidth()) ? 'block' : 'none';
+  }
+
+  // ---------- Trial control ----------
+  function startTrial(){
+    S.pid = +$('pid').value || 1;
+    S.cond = $('cond').value;
+    S.running=true; S.finished=false;
+    S.t0=performance.now(); S.t=0;
+    S.speed=0; S.cadence=0; S.steer=0;
+    S.dist=0; S.lat=0; S.relHead=0;
+    S.brakeEvents=0; S.prevBrake=false; S.offRoadTime=0;
+    S.samples=[];
+    $('setup').classList.add('hidden');
+    $('finish').classList.add('hidden');
+  }
+  function endTrial(reason){
+    if (!S.running) return;
+    S.running=false; S.finished=true;
+    const avg = S.samples.length ? S.samples.reduce((a,s)=>a+s.speed_kmh,0)/S.samples.length : 0;
+    const rms = Math.sqrt(S.samples.reduce((a,s)=>a+s.lat_offset_m*s.lat_offset_m,0)/Math.max(1,S.samples.length));
+    const rev = countSteerReversals(S.samples);
+    $('finishStats').innerHTML =
+      `Reason: <b>${reason}</b> · Time: <b>${fmtTime(S.t)}</b> · Distance: <b>${S.dist.toFixed(0)} m</b><br>`+
+      `Avg speed: <b>${avg.toFixed(1)} km/h</b> · Lateral RMS: <b>${rms.toFixed(2)} m</b><br>`+
+      `Brake events: <b>${S.brakeEvents}</b> · Steer reversals: <b>${rev}</b> · Off-road: <b>${S.offRoadTime.toFixed(1)} s</b>`;
+    $('finish').classList.remove('hidden');
+  }
+  function countSteerReversals(samples){
+    let n=0, prevSign=0;
+    for (const s of samples){
+      const sign=Math.sign(s.steer_deg);
+      if (sign!==0 && sign!==prevSign && prevSign!==0) n++;
+      if (sign!==0) prevSign=sign;
+    }
+    return n;
+  }
+
+  $('startBtn').addEventListener('click', startTrial);
+  $('restartBtn').addEventListener('click', () => {
+    $('finish').classList.add('hidden');
+    $('setup').classList.remove('hidden');
+    $('pid').value = (+$('pid').value || 1) + 1;
+  });
+  ['Mental','Phys','Frus','Real'].forEach(k => {
+    const r=$('r'+k), v=$('v'+k);
+    r.addEventListener('input', ()=> v.textContent=r.value);
+  });
+
+  $('downloadBtn').addEventListener('click', () => {
+    const rms = Math.sqrt(S.samples.reduce((a,s)=>a+s.lat_offset_m*s.lat_offset_m,0)/Math.max(1,S.samples.length));
+    const meta = {
+      participant:S.pid, condition:S.cond,
+      track_length_m:TRACK_LEN,
+      duration_s:+S.t.toFixed(2),
+      distance_m:+S.dist.toFixed(2),
+      brake_events:S.brakeEvents,
+      steer_reversals:countSteerReversals(S.samples),
+      lateral_rms_m:+rms.toFixed(3),
+      off_road_s:+S.offRoadTime.toFixed(2),
+      tlx_mental:+$('rMental').value,
+      tlx_physical:+$('rPhys').value,
+      tlx_frustration:+$('rFrus').value,
+      perceived_realism:+$('rReal').value,
+      generated_at:new Date().toISOString()
+    };
+    let csv='';
+    Object.entries(meta).forEach(([k,v])=> csv += `# ${k},${v}\n`);
+    const cols=['t','pid','cond','speed_kmh','cadence_rpm','steer_deg','dist_m','lat_offset_m','segment','seg_curv','cue','off_road','brake'];
+    csv += cols.join(',')+'\n';
+    for (const s of S.samples) csv += cols.map(c=>s[c]??'').join(',')+'\n';
+    const blob=new Blob([csv],{type:'text/csv'});
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(blob);
+    a.download=`cycling_p${S.pid}_${S.cond}_${Date.now()}.csv`;
+    a.click();
+    setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+  });
+
+  let last=performance.now();
   function tick(now){
-    const dt = Math.min(0.05, (now - last)/1000); last = now;
-    step(dt); draw();
-
-    kmhEl.textContent = (speed*3.6).toFixed(1);
-    rpmEl.textContent = cadence|0;
-    steerEl.textContent = (steer*180/Math.PI).toFixed(0) + '°';
-    distEl.textContent = dist < 1000 ? (dist|0)+' m' : (dist/1000).toFixed(2)+' km';
-
+    const dt=Math.min(0.05,(now-last)/1000); last=now;
+    if (S.running){
+      S.t=(now-S.t0)/1000;
+      step(dt);
+      maybeSample(now);
+      if (S.dist>=TRACK_LEN) endTrial('finish line');
+      else if (S.t>=TIMEOUT_S) endTrial('timeout');
+    }
+    draw(); updateHUD();
     requestAnimationFrame(tick);
   }
   requestAnimationFrame(tick);
