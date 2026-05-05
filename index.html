@@ -386,36 +386,44 @@
     gnd.addColorStop(0,'#4d8033'); gnd.addColorStop(1,'#2d4f1e');
     ctx.fillStyle=gnd; ctx.fillRect(0,H*0.66,W,H*0.34);
 
-    // Look-ahead road. We render N horizontal slices from horizon down.
-    // Each slice corresponds to a road distance ahead and has an x-offset accumulated
-    // from sampled track curvature ahead of the rider.
+    // === Road rendering (proper pseudo-3D, 1/d perspective) ===
+    // Each slice samples the track at distance `dAhead` ahead of the rider.
+    // dAhead=0 → bottom of screen (under the bike); dAhead=LOOKAHEAD → at horizon.
     const horizonY = H*0.55;
-    const roadHalf = roadHalfWidth();
-    const SLICES = 80;
-    const LOOKAHEAD = 90;          // metres of road visible
+    const camH = H - horizonY;
+    const SLICES = 110;
+    const LOOKAHEAD = 110;
     const dStep = LOOKAHEAD/SLICES;
-    let cumOffsetX = 0;            // px
-    let cumDx = 0;                 // accumulated curvature * step
+    const PERSP_K = 4.0;            // larger = denser near horizon
+
+    let cumDx = 0, cumOffsetX = 0;
     const slices = [];
-    for (let i=0;i<SLICES;i++){
+    for (let i=0; i<SLICES; i++){
       const dAhead = i*dStep;
       const k = curvAt(S.dist + dAhead);
-      // accumulate curvature twice for x offset (integral of integral) — Outrun trick
+      // Double-integrate curvature for the visible bend
       cumDx += k * dStep;
-      cumOffsetX += cumDx * dStep * 18; // visual scale
-      // perspective: t=0 horizon, t=1 near
-      const t = i/SLICES;
-      const yTop = horizonY + (1-Math.pow(1-t,2)) * (H-horizonY);  // bias toward near
-      const persp = 0.06 + 0.94*(t*t);  // wider as we get nearer
-      const cx = W/2 + cumOffsetX*persp - S.lat*persp*40;          // shift by lateral
-      const halfPx = roadHalf * persp * 60;
-      slices.push({y:yTop, cx, halfPx, t, dAhead});
+      cumOffsetX += cumDx * dStep * 22;
+      // Proper 1/d perspective: persp big near, small far
+      const persp = camH / (camH + dAhead * PERSP_K * (camH/300));
+      const yTop = horizonY + persp * camH;             // bottom near, horizon far
+      const cx = W/2 + cumOffsetX*persp - S.lat*persp*42;
+      const halfPx = roadHalfWidth() * persp * 60;
+      slices.push({y:yTop, cx, halfPx, dAhead, persp});
     }
-    // Draw road as filled polygon between consecutive slices
-    for (let i=0;i<slices.length-1;i++){
-      const a = slices[i], b = slices[i+1];
-      // alternating shoulder colour for depth
-      ctx.fillStyle = (Math.floor((S.dist+a.dAhead)/4) % 2 === 0) ? '#3a3a3a' : '#363636';
+
+    // Painter's order: draw FAR slices first, NEAR slices last.
+    // Stripes are coloured by the world distance of the strip's midpoint, so
+    // moving forward visibly flushes them DOWN the screen toward the rider.
+    for (let i = slices.length-1; i > 0; i--){
+      const a = slices[i];     // farther (smaller y, narrower)
+      const b = slices[i-1];   // nearer  (larger y, wider)
+      const midD = S.dist + (a.dAhead + b.dAhead)/2;
+      const tarmac = (Math.floor(midD/4) % 2 === 0) ? '#3a3a3a' : '#444';
+      const rumble = (Math.floor(midD/4) % 2 === 0) ? '#cf3838' : '#f0f0f0';
+
+      // road body
+      ctx.fillStyle = tarmac;
       ctx.beginPath();
       ctx.moveTo(a.cx-a.halfPx, a.y);
       ctx.lineTo(a.cx+a.halfPx, a.y);
@@ -423,31 +431,54 @@
       ctx.lineTo(b.cx-b.halfPx, b.y);
       ctx.closePath(); ctx.fill();
 
-      // shoulders (rumble strips)
-      ctx.fillStyle = (Math.floor((S.dist+a.dAhead)/4) % 2 === 0) ? '#cf3838' : '#f0f0f0';
-      const shW = Math.max(2, a.halfPx*0.08);
-      ctx.fillRect(a.cx-a.halfPx-shW, a.y-1, shW, b.y-a.y+2);
-      ctx.fillRect(a.cx+a.halfPx,    a.y-1, shW, b.y-a.y+2);
+      // rumble strips (left + right)
+      ctx.fillStyle = rumble;
+      ctx.beginPath();
+      const shA = Math.max(2, a.halfPx*0.10), shB = Math.max(2, b.halfPx*0.10);
+      ctx.moveTo(a.cx-a.halfPx-shA, a.y);
+      ctx.lineTo(a.cx-a.halfPx,     a.y);
+      ctx.lineTo(b.cx-b.halfPx,     b.y);
+      ctx.lineTo(b.cx-b.halfPx-shB, b.y);
+      ctx.closePath(); ctx.fill();
+      ctx.beginPath();
+      ctx.moveTo(a.cx+a.halfPx,     a.y);
+      ctx.lineTo(a.cx+a.halfPx+shA, a.y);
+      ctx.lineTo(b.cx+b.halfPx+shB, b.y);
+      ctx.lineTo(b.cx+b.halfPx,     b.y);
+      ctx.closePath(); ctx.fill();
 
-      // centerline dashes
-      if (Math.floor((S.dist+a.dAhead)/3) % 2 === 0){
+      // dashed yellow centerline (only on dash strips)
+      if (Math.floor(midD/3) % 2 === 0){
         ctx.fillStyle = '#f5d142';
-        const cW = Math.max(2, a.halfPx*0.04);
-        ctx.fillRect(a.cx-cW/2, a.y, cW, b.y-a.y+1);
+        const cWa = Math.max(2, a.halfPx*0.04);
+        const cWb = Math.max(2, b.halfPx*0.04);
+        ctx.beginPath();
+        ctx.moveTo(a.cx-cWa/2, a.y);
+        ctx.lineTo(a.cx+cWa/2, a.y);
+        ctx.lineTo(b.cx+cWb/2, b.y);
+        ctx.lineTo(b.cx-cWb/2, b.y);
+        ctx.closePath(); ctx.fill();
       }
     }
 
-    // Finish line near end
+    // Finish line — find the slice closest to TRACK_LEN
     const remaining = TRACK_LEN - S.dist;
     if (remaining > 0 && remaining < LOOKAHEAD){
-      // find slice at that dAhead
-      const idx = Math.min(slices.length-1, Math.floor(remaining/dStep));
+      const idx = Math.min(slices.length-1, Math.max(0, Math.floor(remaining/dStep)));
       const sl = slices[idx];
       const sq = Math.max(6, sl.halfPx*0.18);
       for (let i=-4;i<=4;i++){
         ctx.fillStyle = (i)%2===0 ? '#fff' : '#111';
         ctx.fillRect(sl.cx + i*sq - sq/2, sl.y - sq, sq, sq);
       }
+      // FINISH banner above
+      ctx.fillStyle='rgba(0,0,0,.6)';
+      const bw = Math.max(80, sl.halfPx*1.4), bh = Math.max(14, sl.halfPx*0.18);
+      roundRect(sl.cx-bw/2, sl.y - sq - bh - 4, bw, bh, 4); ctx.fill();
+      ctx.fillStyle='#fff'; ctx.font = `bold ${Math.max(10, sl.halfPx*0.16)}px system-ui`;
+      ctx.textAlign='center'; ctx.textBaseline='middle';
+      ctx.fillText('FINISH', sl.cx, sl.y - sq - bh/2 - 4);
+      ctx.textAlign='start'; ctx.textBaseline='alphabetic';
     }
 
     // Foreground bike + rider (rear-view). Tilts opposite to steer (lean into turn).
